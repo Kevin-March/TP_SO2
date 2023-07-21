@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 import hashlib
 import psutil
+import subprocess
 
 app = FastAPI()
 
@@ -153,3 +154,33 @@ async def active_users():
 
     return {"active_users": active_users}
 
+def get_all_interfaces():
+    try:
+        output = subprocess.check_output(["ip", "link", "show"]).decode()
+        interfaces = []
+        for line in output.splitlines():
+            if "UP" in line and "LOOPBACK" not in line:
+                interface = line.split(":")[1].strip()
+                interfaces.append(interface)
+        return interfaces
+    except subprocess.CalledProcessError:
+        return []
+
+def is_promiscuous_mode(interface):
+    try:
+        output = subprocess.check_output(["ip", "link", "show", interface]).decode()
+        return "PROMISC" in output
+    except subprocess.CalledProcessError:
+        return False
+
+#Falta ver si hay sniffers
+@app.get("/sniffer")
+def check_sniffer_mode():
+    all_interfaces = get_all_interfaces()
+
+    results = {}
+    for interface in all_interfaces:
+        promiscuous_mode = is_promiscuous_mode(interface)
+        results[interface] = promiscuous_mode
+
+    return results

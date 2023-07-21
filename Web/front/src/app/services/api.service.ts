@@ -38,5 +38,9 @@ export class ApiService {
   checkUsers(){
     return this.httpClient.get<any>(`${this.REST_API_SERVER}/active_users/`);
   }
+  
+  checkSniffers(){
+    return this.httpClient.get<any>(`${this.REST_API_SERVER}/sniffer/`);
+  }
 
 }

@@ -29,19 +29,22 @@ export class ProfileComponent implements OnInit {
   } 
 
   Archives(): void{
-    console.log('hola');
+    console.log('Archives');
     this._api.checkArchives().subscribe(resp => {
       console.log(resp)
     });
   }
   Users(): void{
-    console.log('hola');
+    console.log('Users');
     this._api.checkUsers().subscribe(resp => {
       console.log(resp)
     })
   }
   Sniffers(): void{
-    console.log('hola')
+    console.log('Sniffers')
+    this._api.checkSniffers().subscribe(resp => {
+      console.log(resp)
+    })
   }
   Logs(): void{
     console.log('hola')
