@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import os
 import hashlib
+import psutil
 
 app = FastAPI()
 
@@ -136,4 +137,19 @@ def user(Authorize: AuthJWT = Depends()):
     return {"user": current_user, 'data': 'jwt test works'}
 
     # return {"user": 123124124, 'data': 'jwt test works'}
+
+@app.get("/active_users/")
+async def active_users():
+    active_users = []
+
+    for user in psutil.users():
+        user_info = {
+            "username": user.name,
+            "terminal": user.terminal,
+            "host": user.host,
+            "started_at": user.started,
+        }
+        active_users.append(user_info)
+
+    return {"active_users": active_users}
 

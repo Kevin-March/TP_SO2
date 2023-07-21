@@ -35,7 +35,10 @@ export class ProfileComponent implements OnInit {
     });
   }
   Users(): void{
-    console.log('hola')
+    console.log('hola');
+    this._api.checkUsers().subscribe(resp => {
+      console.log(resp)
+    })
   }
   Sniffers(): void{
     console.log('hola')

@@ -35,4 +35,8 @@ export class ApiService {
     return this.httpClient.get<any>(`${this.REST_API_SERVER}/archivos/`);
   }
 
+  checkUsers(){
+    return this.httpClient.get<any>(`${this.REST_API_SERVER}/active_users/`);
+  }
+
 }
