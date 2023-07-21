@@ -43,4 +43,12 @@ export class ApiService {
     return this.httpClient.get<any>(`${this.REST_API_SERVER}/sniffer/`);
   }
 
+  checkMail(){
+    return this.httpClient.get<any>(`${this.REST_API_SERVER}/mail/`);
+  }
+
+  checkMemory(){
+    return this.httpClient.get<any>(`${this.REST_API_SERVER}/memoria/`);
+  }
+
 }

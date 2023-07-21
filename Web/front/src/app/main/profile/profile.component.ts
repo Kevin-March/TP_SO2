@@ -50,10 +50,16 @@ export class ProfileComponent implements OnInit {
     console.log('hola')
   }
   Mails(): void{
-    console.log('hola')
+    console.log('Mail')
+    this._api.checkMail().subscribe(resp => {
+      console.log(resp)
+    })
   }
   Memory(): void{
-    console.log('hola')
+    console.log('Memory')
+    this._api.checkMemory().subscribe(resp => {
+      console.log(resp)
+    })
   }
   Temp(): void{
     console.log('hola')

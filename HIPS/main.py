@@ -11,6 +11,11 @@ import os
 import hashlib
 import psutil
 import subprocess
+import socket
+import smtplib
+from email.mime.text import MIMEText
+from datetime import datetime, timedelta
+
 
 app = FastAPI()
 
@@ -32,6 +37,16 @@ shadow_file = "/etc/shadow"
 #variables
 passwd_hash = None
 shadow_hash = None
+
+suspicious_ips = ["192.168.1.100", "10.0.0.2", "127.0.0.1"]
+
+#ajustar este para el maximo de emails enviados por un usuario
+max_emails_per_user = 50
+
+#ajustar este para el porcentaje de memoria
+memory_percentage =50.0 
+# ajustar este para el maximo de horas de un proceso que utilize mucha memoria
+max_hours_memory=1
 
 
 def calculate_file_hash(file_path):
@@ -115,8 +130,6 @@ async def check_file_modifications():
 
     response = {"message": "Todo bien por ahora"}
     
-    print("passwd_hash:", passwd_hash)
-    print("current_passwd_hash:", current_passwd_hash)
 
     # Check if the hashes changed
     if passwd_hash != current_passwd_hash:
@@ -139,20 +152,74 @@ def user(Authorize: AuthJWT = Depends()):
 
     # return {"user": 123124124, 'data': 'jwt test works'}
 
+
+def is_suspicious(ip_address):
+    return ip_address in suspicious_ips
+
+def get_user_ip():
+    try:
+        hostname = socket.gethostname()
+        user_ip = socket.gethostbyname(hostname)
+        return user_ip
+    except socket.gaierror:
+        return None
+
+def block_ip(ip_address):
+    try:
+        subprocess.run(["sudo", "ipset", "add", "blocked_ips", ip_address])
+        subprocess.run(["sudo", "iptables", "-A", "INPUT", "-s", ip_address, "-j", "DROP"])
+    except subprocess.CalledProcessError:
+        pass
+
+@app.on_event("startup")
+def startup_event():
+    # Create an IP set named "blocked_ips" if it doesn't exist
+    subprocess.run(["sudo", "ipset", "-N", "blocked_ips", "iphash"])
+
 @app.get("/active_users/")
 async def active_users():
     active_users = []
+    user_sessions = {}
+
+    user_ip = get_user_ip()
 
     for user in psutil.users():
-        user_info = {
-            "username": user.name,
+        user_ip_address = user_ip or "Unknown"
+        username = user.name
+        session_info = {
             "terminal": user.terminal,
-            "host": user.host,
+            "ip_address": user_ip_address,
             "started_at": user.started,
         }
-        active_users.append(user_info)
 
-    return {"active_users": active_users}
+        if username in user_sessions:
+            user_sessions[username]["sessions"].append(session_info)
+        else:
+            user_sessions[username] = {
+                "sessions": [session_info],
+                "change_password": False,  # Flag to indicate if the user needs to change their password
+            }
+
+        # Check if the user has multiple active sessions
+        if len(user_sessions[username]["sessions"]) > 1:
+            user_sessions[username]["change_password"] = True
+
+        active_users.append(session_info)
+
+    response = {"message": "Buscando Todos los usuarios"}
+
+    # If any user has multiple active sessions, add an alert to change password
+    if any(session_data["change_password"] for session_data in user_sessions.values()):
+        response["alert_change_password"] = f"Usuario {username}, cambie su contraseña debido a múltiples sesiones activas. O te hackearon papu O deja de conectarte por todos lados"
+
+    response["active_users"] = active_users
+
+    # Check if the user's IP address is suspicious, block access, and add an alert
+    if user_ip and is_suspicious(user_ip):
+        response["alert_block_ip"] = "IP AmongUs BLOQUEADO PAPU"
+        # block_ip(user_ip)  
+
+    return response
 
 def get_all_interfaces():
     try:
@@ -184,3 +251,86 @@ def check_sniffer_mode():
         results[interface] = promiscuous_mode
 
     return results
+
+@app.get("/mail")
+async def check_mail_queue():
+    user_ip = get_user_ip()
+
+    response = {"message": "Verificando tamaño de cola de correos"}
+
+    # Check mail queue size
+    try:
+        output = subprocess.check_output(["mailq"])
+        queue_size = len(output.splitlines())
+        response["mail_queue_size"] = queue_size
+    except subprocess.CalledProcessError as e:
+        response["error"] = f"Error checking mail queue: {e}"
+
+    # Check if the user's IP address is suspicious, block access, and add an alert
+    if user_ip and is_suspicious(user_ip):
+        response["alert_block_ip"] = "IP sospechosa bloqueada"
+        # block_ip(user_ip)  # Uncomment this line to block the suspicious IP address
+
+    # Check if a user generates many emails, and send an alert to change password
+    user_email_count = get_user_email_count()
+    if user_email_count > max_emails_per_user:
+        username = psutil.Process().username()
+        send_alert_email(username)
+        response["alert_change_password"] = f"Usuario {username}, cambie su contraseña debido a muchos correos enviados."
+
+    return response
+
+def get_user_email_count():
+    try:
+        output = subprocess.check_output(["grep", "^From:", "/var/log/mail.log"])
+        email_count = len(output.splitlines())
+        return email_count
+    except subprocess.CalledProcessError as e:
+        print(f"Error counting emails: {e}")
+        return 0
+
+def send_alert_email(username):
+    from_address = "throw0away0trash@gmail.com"
+    to_address = "thegezersylar@gmail.com"
+    subject = "Alerta de seguridad - Cambio de contraseña"
+    body = f"Estimado {username},\n\n Cambie su contrasenha pq le hackeraron papu :v"
+    
+    msg = MIMEText(body)
+    msg["From"] = from_address
+    msg["To"] = to_address
+    msg["Subject"] = subject
+
+    try:
+        server = smtplib.SMTP("smtp.example.com", 587)
+        server.starttls()
+        server.login(from_address, "Throw_Away_Trash")
+        server.sendmail(from_address, to_address, msg.as_string())
+        server.quit()
+    except smtplib.SMTPException as e:
+        print(f"Error sending alert email: {e}")
+
+@app.get("/memoria")
+async def check_memory_usage():
+    response = {"message": "Verificando procesos con alto consumo de memoria"}
+
+    # Get the processes consuming a high percentage of memory
+    high_memory_processes = []
+    for process in psutil.process_iter(["pid", "name", "memory_percent", "create_time"]):
+        if process.info["memory_percent"] > memory_percentage:  
+            high_memory_processes.append(process.info)
+
+    response["high_memory_processes"] = high_memory_processes
+
+    # Terminate processes that have been running for more than 1 hour
+    now = datetime.now()
+    for process_info in high_memory_processes:
+        create_time = datetime.fromtimestamp(process_info["create_time"])
+        if (now - create_time) > timedelta(max_hours_memory):
+            try:
+                process = psutil.Process(process_info["pid"])
+                process.terminate()
+                response["message"] = f"Proceso {process_info['name']} (PID: {process_info['pid']}) terminado por alto consumo de memoria y tiempo de ejecución."
+            except psutil.NoSuchProcess:
+                response["message"] = "Error al terminar el proceso: proceso no encontrado."
+
+    return response
