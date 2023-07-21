@@ -10,7 +10,7 @@ import { map } from 'rxjs/operators';
 export class ApiService { 
  
  
-  private REST_API_SERVER = "http://localhost:8000/"; 
+  private REST_API_SERVER = "http://localhost:8000"; 
   constructor(private httpClient: HttpClient) { } 
  
   getTypeRequest(url: any) { 
@@ -31,5 +31,8 @@ export class ApiService {
     })) 
   }
   
+  checkArchives(){
+    return this.httpClient.get<any>(`${this.REST_API_SERVER}/archivos/`);
+  }
 
 }

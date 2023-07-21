@@ -28,4 +28,38 @@ export class ProfileComponent implements OnInit {
     }); 
   } 
 
+  Archives(): void{
+    console.log('hola');
+    this._api.checkArchives().subscribe(resp => {
+      console.log(resp)
+    });
+  }
+  Users(): void{
+    console.log('hola')
+  }
+  Sniffers(): void{
+    console.log('hola')
+  }
+  Logs(): void{
+    console.log('hola')
+  }
+  Mails(): void{
+    console.log('hola')
+  }
+  Memory(): void{
+    console.log('hola')
+  }
+  Temp(): void{
+    console.log('hola')
+  }
+  DDOS(): void{
+    console.log('hola')
+  }
+  CRON(): void{
+    console.log('hola')
+  }
+  Invalid(): void{
+    console.log('hola')
+  }
+
 }
