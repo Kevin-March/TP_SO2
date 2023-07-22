@@ -10,7 +10,7 @@ import { map } from 'rxjs/operators';
 export class ApiService { 
  
  
-  private REST_API_SERVER = "http://localhost:8000"; 
+  private REST_API_SERVER = "http://localhost:8000/"; 
   constructor(private httpClient: HttpClient) { } 
  
   getTypeRequest(url: any) { 
@@ -32,23 +32,31 @@ export class ApiService {
   }
   
   checkArchives(){
-    return this.httpClient.get<any>(`${this.REST_API_SERVER}/archivos/`);
+    return this.httpClient.get<any>(`${this.REST_API_SERVER}archivos/`);
   }
 
   checkUsers(){
-    return this.httpClient.get<any>(`${this.REST_API_SERVER}/active_users/`);
+    return this.httpClient.get<any>(`${this.REST_API_SERVER}active_users/`);
   }
   
   checkSniffers(){
-    return this.httpClient.get<any>(`${this.REST_API_SERVER}/sniffer/`);
+    return this.httpClient.get<any>(`${this.REST_API_SERVER}sniffer/`);
   }
 
   checkMail(){
-    return this.httpClient.get<any>(`${this.REST_API_SERVER}/mail/`);
+    return this.httpClient.get<any>(`${this.REST_API_SERVER}mail/`);
   }
 
   checkMemory(){
-    return this.httpClient.get<any>(`${this.REST_API_SERVER}/memoria/`);
+    return this.httpClient.get<any>(`${this.REST_API_SERVER}memoria/`);
+  }
+
+  checkTmp(){
+    return this.httpClient.get<any>(`${this.REST_API_SERVER}temp/`);
+  }
+
+  checkCron(){
+    return this.httpClient.get<any>(`${this.REST_API_SERVER}cron/`);
   }
 
 }

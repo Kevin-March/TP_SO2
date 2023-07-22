@@ -13,8 +13,11 @@ import psutil
 import subprocess
 import socket
 import smtplib
-from email.mime.text import MIMEText
 from datetime import datetime, timedelta
+import stat
+import shutil
+from typing import List
+
 
 
 app = FastAPI()
@@ -38,6 +41,10 @@ shadow_file = "/etc/shadow"
 passwd_hash = None
 shadow_hash = None
 
+#A donde van los archivos sospechosos
+QUARANTINE_FOLDER = "/tmp/cuarentena"
+
+#IPS Sospechosas
 suspicious_ips = ["192.168.1.100", "10.0.0.2", "127.0.0.1"]
 
 #ajustar este para el maximo de emails enviados por un usuario
@@ -275,8 +282,7 @@ async def check_mail_queue():
     user_email_count = get_user_email_count()
     if user_email_count > max_emails_per_user:
         username = psutil.Process().username()
-        send_alert_email(username)
-        response["alert_change_password"] = f"Usuario {username}, cambie su contraseña debido a muchos correos enviados."
+        response["alert_change_password"] = f"Usuario {username}, cambie su contraseña debido a muchos correos enviados. Por razones de seguridad, se recomienda cambiar la contraseña regularmente."
 
     return response
 
@@ -288,26 +294,6 @@ def get_user_email_count():
     except subprocess.CalledProcessError as e:
         print(f"Error counting emails: {e}")
         return 0
-
-def send_alert_email(username):
-    from_address = "throw0away0trash@gmail.com"
-    to_address = "thegezersylar@gmail.com"
-    subject = "Alerta de seguridad - Cambio de contraseña"
-    body = f"Estimado {username},\n\n Cambie su contrasenha pq le hackeraron papu :v"
-    
-    msg = MIMEText(body)
-    msg["From"] = from_address
-    msg["To"] = to_address
-    msg["Subject"] = subject
-
-    try:
-        server = smtplib.SMTP("smtp.example.com", 587)
-        server.starttls()
-        server.login(from_address, "Throw_Away_Trash")
-        server.sendmail(from_address, to_address, msg.as_string())
-        server.quit()
-    except smtplib.SMTPException as e:
-        print(f"Error sending alert email: {e}")
 
 @app.get("/memoria")
 async def check_memory_usage():
@@ -332,5 +318,147 @@ async def check_memory_usage():
                 response["message"] = f"Proceso {process_info['name']} (PID: {process_info['pid']}) terminado por alto consumo de memoria y tiempo de ejecución."
             except psutil.NoSuchProcess:
                 response["message"] = "Error al terminar el proceso: proceso no encontrado."
+
+    return response
+
+def move_files_to_quarantine():
+    extensions_to_quarantine = [".cpp", ".c", ".exe", ".sh", ".php", ".py"]
+
+    if not os.path.exists(QUARANTINE_FOLDER):
+        os.makedirs(QUARANTINE_FOLDER)
+
+    files_in_tmp = os.listdir("/tmp")
+    alerts = []  # Lista para almacenar alertas
+    for file_name in files_in_tmp:
+        for extension in extensions_to_quarantine:
+            if file_name.endswith(extension):
+                file_path = os.path.join("/tmp", file_name)
+                quarantine_path = os.path.join(QUARANTINE_FOLDER, file_name)
+
+                try:
+                    shutil.move(file_path, quarantine_path)
+                    os.chmod(quarantine_path, stat.S_IWUSR)
+                    alerts.append(f"Archivo {file_name} movido a cuarentena.")
+                except Exception as e:
+                    raise HTTPException(status_code=500, detail=str(e))
+
+    return alerts
+
+
+def terminate_processes_in_tmp():
+    alerts = []  # Lista para almacenar alertas
+    for process in psutil.process_iter(['pid', 'cmdline']):
+        try:
+            # Get the full command line of the process
+            cmdline = process.info['cmdline']
+            if not cmdline:
+                continue
+
+            # Check if the process is running in /tmp directory
+            if any("/tmp" in arg for arg in cmdline):
+                process.terminate()
+                alerts.append(f"Proceso {process.info['pid']} terminado.")
+        except psutil.NoSuchProcess:
+            continue
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    return alerts
+
+
+def check_for_scripts_in_files():
+    extensions_to_check = [".cpp", ".c", ".exe", ".sh", ".php", ".py"]
+
+    files_in_tmp = os.listdir("/tmp")
+    suspicious_files = []
+    for file_name in files_in_tmp:
+        for extension in extensions_to_check:
+            if file_name.endswith(extension):
+                file_path = os.path.join("/tmp", file_name)
+                with open(file_path, "r") as file:
+                    content = file.read()
+                    if "import os" in content or "import subprocess" in content:
+                        suspicious_files.append(file_name)
+
+    return suspicious_files
+
+
+@app.get("/temp")
+def check_tmp_directory():
+    response = {"message": "Checking /tmp directory for suspicious files and processes"}
+
+    # Move suspicious files to quarantine and get alerts
+    quarantine_alerts = move_files_to_quarantine()
+    if quarantine_alerts:
+        response["quarantine_alerts"] = quarantine_alerts
+    else:
+        response["quarantine_alerts"] = "No quarentine alerts found in /tmp directory"
+        
+
+    # Terminate processes in /tmp directory and get alerts
+    terminate_alerts = terminate_processes_in_tmp()
+    if terminate_alerts:
+        response["terminate_alerts"] = terminate_alerts
+    else:
+        response["terminate_alerts"] = "No terminate alerts found in /tmp directory"
+
+    # Check for scripts in files
+    suspicious_files = check_for_scripts_in_files()
+    if suspicious_files:
+        response["suspicious_files"] = suspicious_files
+    else:
+        response["suspicious_files"] = "No suspicious files found in /tmp directory"
+
+    return response
+
+
+@app.get("/test-jwt")
+def test_jwt():
+    return {"message": "Test JWT route works!"}
+
+
+def execute_process(command: str) -> List[str]:
+    try:
+        output = subprocess.check_output(command, shell=True, text=True)
+        return output.splitlines()
+    except subprocess.CalledProcessError as e:
+        print(f"Error executing command: {e}")
+        return []
+
+def check_user_cron() -> List[str]:
+    alerts = []
+
+    try:
+        command_getuser = "cat /etc/passwd | awk -F : '{print $1}'"
+        list_user = execute_process(command_getuser)
+        list_user.pop(0)
+
+        if list_user:
+            for user in list_user:
+                command_crontab = f"crontab -u {user} -l"
+                list_cron = execute_process(command_crontab)
+
+                if "no crontab for" in "".join(list_cron):
+                    alerts.append(f"No cron job found for user {user}")
+                else:
+                    for cron in list_cron:
+                        cron = cron.split()
+                        alerts.append(f"User {user} is executing the file {cron[-1]} as cron")
+
+    except Exception as error:
+        print('An exception occurred', error)
+    
+    return alerts
+
+@app.get("/cron")
+def examine_user_cron():
+    response = {"message": "Checking user cron jobs"}
+
+    # Check user cron jobs
+    cron_alerts = check_user_cron()
+    if cron_alerts:
+        response["cron_alerts"] = cron_alerts
+    else:
+        response["cron_alerts"] = "No user cron jobs found"
 
     return response

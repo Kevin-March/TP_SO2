@@ -62,13 +62,18 @@ export class ProfileComponent implements OnInit {
     })
   }
   Temp(): void{
-    console.log('hola')
+    console.log('Temp')
+    this._api.checkTmp().subscribe(resp => {
+      console.log(resp)
+    })
   }
   DDOS(): void{
     console.log('hola')
   }
   CRON(): void{
-    console.log('hola')
+    this._api.checkCron().subscribe(resp => {
+      console.log(resp)
+    })
   }
   Invalid(): void{
     console.log('hola')
