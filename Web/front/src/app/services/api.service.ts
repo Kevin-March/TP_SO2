@@ -59,4 +59,11 @@ export class ApiService {
     return this.httpClient.get<any>(`${this.REST_API_SERVER}cron/`);
   }
 
+  checkInvalid(){
+    return this.httpClient.get<any>(`${this.REST_API_SERVER}invalid/`);
+  }
+  checkLogs(){
+    return this.httpClient.get<any>(`${this.REST_API_SERVER}logs/`);
+  }
+
 }

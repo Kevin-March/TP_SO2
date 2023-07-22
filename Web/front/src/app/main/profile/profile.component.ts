@@ -47,7 +47,10 @@ export class ProfileComponent implements OnInit {
     })
   }
   Logs(): void{
-    console.log('hola')
+    console.log('Logs')
+    this._api.checkLogs().subscribe(resp => {
+      console.log(resp)
+    })
   }
   Mails(): void{
     console.log('Mail')
@@ -71,12 +74,16 @@ export class ProfileComponent implements OnInit {
     console.log('hola')
   }
   CRON(): void{
+    console.log("Cron")
     this._api.checkCron().subscribe(resp => {
       console.log(resp)
     })
   }
   Invalid(): void{
-    console.log('hola')
+    console.log('Invalid')
+    this._api.checkInvalid().subscribe(resp => {
+      console.log(resp)
+    })
   }
 
 }

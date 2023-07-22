@@ -17,7 +17,10 @@ from datetime import datetime, timedelta
 import stat
 import shutil
 from typing import List
-
+from collections import defaultdict
+from typing import Dict
+from collections import defaultdict
+import re
 
 
 app = FastAPI()
@@ -34,6 +37,7 @@ app.add_middleware(
     allow_methods=["*"], 
     allow_headers=["*"]
 )
+
 #rutas
 passwd_file = "/etc/passwd"
 shadow_file = "/etc/shadow"
@@ -54,6 +58,9 @@ max_emails_per_user = 50
 memory_percentage =50.0 
 # ajustar este para el maximo de horas de un proceso que utilize mucha memoria
 max_hours_memory=1
+
+# Diccionario para mantener un registro de IPs con intentos de acceso no válidos
+invalid_attempts: defaultdict = defaultdict(int)
 
 
 def calculate_file_hash(file_path):
@@ -461,4 +468,137 @@ def examine_user_cron():
     else:
         response["cron_alerts"] = "No user cron jobs found"
 
+    return response
+
+def check_authentication_failure():
+    suspicious_users = set()
+    suspicious_ips = set()
+    command_auth = "cat /var/log/auth.log | grep 'authentication failure'"
+
+    try:
+        output = subprocess.check_output(command_auth, shell=True, text=True)
+        lines = output.splitlines()
+
+        for line in lines:
+            if "Invalid user" in line:
+                user = line.split("Invalid user ")[1].split(" ")[0]
+                suspicious_users.add(user)
+
+            if "Failed password" in line:
+                ip = line.split("from ")[1].split(" ")[0]
+                suspicious_ips.add(ip)
+
+    except subprocess.CalledProcessError as e:
+        print("Error while checking authentication failure logs:", e)
+
+    return suspicious_users, suspicious_ips
+
+
+@app.get("/invalid")
+def check_invalid_login_attempts():
+    suspicious_users, suspicious_ips = check_authentication_failure()
+
+    response = {
+        "message": "Checking logs for invalid login attempts.",
+        "suspicious_users": list(suspicious_users),
+        "suspicious_ips": list(suspicious_ips),
+    }
+
+    if suspicious_users or suspicious_ips:
+        # Replace the following line with code to send an alarm notification (e.g., email, log message, etc.)
+        # logs.log_alarm(...)
+        response["alarm"] = "Suspicious activity detected! Check logs for more details."
+
+    return response
+
+
+def create_hips_directory():
+    hips_directory = "/var/logs/hips"
+    if not os.path.exists(hips_directory):
+        os.makedirs(hips_directory)
+
+def process_secure_log():
+    try:
+        command_auth_log = "grep 'Failed password' /var/log/secure"
+        output = subprocess.check_output(command_auth_log, shell=True, text=True)
+        if output:
+            hips_log_path = "/var/logs/hips/secure_log.txt"
+            with open(hips_log_path, "a") as file:
+                file.write(output)
+            return True
+    except subprocess.CalledProcessError as e:
+        pass
+    return False
+
+def process_message_log():
+    try:
+        command_message_log = "grep 'Authentication failure' /var/log/messages"
+        output = subprocess.check_output(command_message_log, shell=True, text=True)
+        if output:
+            hips_log_path = "/var/logs/hips/message_log.txt"
+            with open(hips_log_path, "a") as file:
+                file.write(output)
+            return True
+    except subprocess.CalledProcessError as e:
+        pass
+    return False
+
+def process_access_log():
+    try:
+        command_access_log = "grep 'Error' /var/log/httpd/access.log"
+        output = subprocess.check_output(command_access_log, shell=True, text=True)
+        if output:
+            hips_log_path = "/var/logs/hips/access_log.txt"
+            with open(hips_log_path, "a") as file:
+                file.write(output)
+            return True
+    except subprocess.CalledProcessError as e:
+        pass
+    return False
+
+def process_mail_log():
+    try:
+        command_mail_log = "grep 'from=<.*>, size=' /var/log/maillog"
+        output = subprocess.check_output(command_mail_log, shell=True, text=True)
+        if output:
+            hips_log_path = "/var/logs/hips/mail_log.txt"
+            with open(hips_log_path, "a") as file:
+                file.write(output)
+            return True
+    except subprocess.CalledProcessError as e:
+        pass
+    return False
+
+@app.get("/logs")
+def examine_logs():
+    create_hips_directory()
+    
+    found_secure_log = process_secure_log()
+    found_message_log = process_message_log()
+    found_access_log = process_access_log()
+    found_mail_log = process_mail_log()
+    
+    response = {"message": "Logs examined and processed"}
+    
+    if found_secure_log:
+        response["alarm_secure_log"] = "Found suspicious entry in secure log"
+    else:
+        response["alarm_secure_log"] = "No suspicious entry found in secure log"
+    
+    if found_message_log:
+        response["alarm_message_log"] = "Found suspicious entry in message log"
+    else:
+        response["alarm_message_log"] = "No suspicious entry found in message log"
+    
+    if found_access_log:
+        response["alarm_access_log"] = "Found suspicious entry in access log"
+    else:
+        response["alarm_access_log"] = "No suspicious entry found in access log"
+    
+    if found_mail_log:
+        response["alarm_mail_log"] = "Found suspicious entry in mail log"
+    else:
+        response["alarm_mail_log"] = "No suspicious entry found in mail log"
+    
+    
     return response
