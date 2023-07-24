@@ -1,7 +1,7 @@
 # TP_SO2
 Trabajo Final Sistemas Operativos 2
 
-#Requisitos
+# Requisitos
 Docker
 Angular
 
@@ -10,17 +10,19 @@ Para El HIPS
 
 0 - descargar el codigo fuente `https://gitlab.com/kevin-march/hips` 
 
-dependencias: `sudo apt-get install binutils python3-dev libproj-dev gdal-bin libpq-dev`
+1 - dependencias: `sudo apt-get install binutils python3-dev libproj-dev gdal-bin libpq-dev`
 
-1- `python -m venv .venv`
+2- `docker-compose up -d web_server`
 
-2- `source ./.venv/bin/activate`
+3- `python -m venv .venv`
 
-3- `pip install -r requeriments.txt`
+4- `source ./.venv/bin/activate`
 
-4 - `uvicorn main:app –reload`
+5- `pip install -r requeriments.txt`
 
-5- `Interfaz web: localhost:8000/docs`
+6 - `uvicorn main:app –reload`
+
+7- `Interfaz web: localhost:8000/docs`
 
 Para La Web
 
