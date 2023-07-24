@@ -21,6 +21,7 @@ from collections import defaultdict
 from typing import Dict
 from collections import defaultdict
 import re
+import datetime
 
 
 app = FastAPI()
@@ -136,7 +137,7 @@ async def check_file_modifications():
     current_passwd_hash = calculate_file_hash(passwd_file)
     current_shadow_hash = calculate_file_hash(shadow_file)
 
-    # VVer si Existen o tira error
+    # Ver si Existen o tira error
     if current_passwd_hash is None:
         return {"message": "El archivo /etc/passwd no existe."}
     if current_shadow_hash is None:
@@ -145,14 +146,16 @@ async def check_file_modifications():
     response = {"message": "Todo bien por ahora"}
     
 
-    # Check if the hashes changed
+    # Ver si el Hash se cambio desde el incio
     if passwd_hash != current_passwd_hash:
         response["passwd"] = "El archivo /etc/passwd se modificó. ¡Alerta!"
+        write_alarm_log("Modificación en /etc/passwd")
     else:
         response["passwd"] = "El archivo /etc/passwd no ha sido modificado."
 
     if shadow_hash != current_shadow_hash:
         response["shadow"] = "El archivo /etc/shadow se modificó. ¡Alerta!"
+        write_alarm_log("Modificación en /etc/shadow")
     else:
         response["shadow"] = "El archivo /etc/shadow no ha sido modificado."
 
@@ -190,6 +193,16 @@ def startup_event():
     # Create an IP set named "blocked_ips" if it doesn't exist
     subprocess.run(["sudo", "ipset", "-N", "blocked_ips", "iphash"])
 
+def write_prevention_log(alert_type, ip=None):
+    log_path = "/var/log/hips/prevencion.log"
+    timestamp = datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+
+    with open(log_path, "a") as log_file:
+        if ip:
+            log_file.write(f"{timestamp} :: {alert_type} :: {ip}\n")
+        else:
+            log_file.write(f"{timestamp} :: {alert_type}\n")
+
 @app.get("/active_users/")
 async def active_users():
     active_users = []
@@ -201,6 +214,7 @@ async def active_users():
         user_ip_address = user_ip or "Unknown"
         username = user.name
         session_info = {
+            "username": username,
             "terminal": user.terminal,
             "ip_address": user_ip_address,
             "started_at": user.started,
@@ -211,10 +225,10 @@ async def active_users():
         else:
             user_sessions[username] = {
                 "sessions": [session_info],
-                "change_password": False,  # Flag to indicate if the user needs to change their password
+                "change_password": False,  # te avisa si debe cambiar la contrasenha
             }
 
-        # Check if the user has multiple active sessions
+        # Chequea si el usuario debe tiene multiples sesiones
         if len(user_sessions[username]["sessions"]) > 1:
             user_sessions[username]["change_password"] = True
 
@@ -222,49 +236,78 @@ async def active_users():
 
     response = {"message": "Buscando Todos los usuarios"}
 
-    # If any user has multiple active sessions, add an alert to change password
+    # Si tiene multiples sesiones entonces que cambie la passwd
     if any(session_data["change_password"] for session_data in user_sessions.values()):
         response["alert_change_password"] = f"Usuario {username}, cambie su contraseña debido a múltiples sesiones activas. O te hackearon papu O deja de conectarte por todos lados"
 
     response["active_users"] = active_users
 
-    # Check if the user's IP address is suspicious, block access, and add an alert
+    # Ve si la ip de inicio es rara
     if user_ip and is_suspicious(user_ip):
         response["alert_block_ip"] = "IP AmongUs BLOQUEADO PAPU"
-        # block_ip(user_ip)  
+        # block_ip(user_ip)
+        write_prevention_log("Bloqueo de IP AmongUs", ip=user_ip)  
 
     return response
 
-def get_all_interfaces():
-    try:
-        output = subprocess.check_output(["ip", "link", "show"]).decode()
-        interfaces = []
-        for line in output.splitlines():
-            if "UP" in line and "LOOPBACK" not in line:
-                interface = line.split(":")[1].strip()
-                interfaces.append(interface)
-        return interfaces
-    except subprocess.CalledProcessError:
-        return []
+def check_sniffers():
+    sniffers = ["tcpdump", "ethereal", "wireshark"]
+    blocked_sniffers = []
+    
+    for sniffer in sniffers:
+        try:
+            command_check_sniffer = f"ps -ef | grep {sniffer} | grep -v grep"
+            output = subprocess.check_output(command_check_sniffer, shell=True, text=True)
+            if output:
+                blocked_sniffers.append(sniffer)
+                os.system(f"sudo killall {sniffer}")
+        except subprocess.CalledProcessError as e:
+            pass
+    
+    return blocked_sniffers
 
-def is_promiscuous_mode(interface):
+def check_promiscuous_mode():
     try:
-        output = subprocess.check_output(["ip", "link", "show", interface]).decode()
-        return "PROMISC" in output
-    except subprocess.CalledProcessError:
-        return False
+        command_check_promiscuous = "ip link show"
+        output = subprocess.check_output(command_check_promiscuous, shell=True, text=True)
+        interfaces_info = output.strip().split("\n\n")
+        promiscuous_interfaces = []
 
-#Falta ver si hay sniffers
+        for interface_info in interfaces_info:
+            if "PROMISC" in interface_info:
+                interface_name = interface_info.split(":")[1].strip()
+                promiscuous_interfaces.append(interface_name)
+
+        return promiscuous_interfaces
+    except subprocess.CalledProcessError as e:
+        pass
+
+    return []
+
 @app.get("/sniffer")
-def check_sniffer_mode():
-    all_interfaces = get_all_interfaces()
-
-    results = {}
-    for interface in all_interfaces:
-        promiscuous_mode = is_promiscuous_mode(interface)
-        results[interface] = promiscuous_mode
-
-    return results
+def check_sniffer_and_promiscuous_mode():
+    blocked_sniffers = check_sniffers()
+    promiscuous_interfaces = check_promiscuous_mode()
+    
+    response = {"message": "Sniffer and promiscuous mode check completed"}
+    
+    if blocked_sniffers:
+        response["blocked_sniffers"] = blocked_sniffers
+        response["alarm_blocked_sniffers"] = "Se bloqueo Algun sniffer, chales ya te la metieron"
+        write_prevention_log("Bloqueo de Snifers") 
+    else:
+        response["blocked_sniffers"] = []
+        response["alarm_blocked_sniffers"] = "NO se detecto sniffers, bien ahi rey"
+    
+    if promiscuous_interfaces:
+        response["promiscuous_interfaces"] = promiscuous_interfaces
+        response["alarm_promiscuous_mode"] = "Estan en modo promiscuo"
+        write_prevention_log("Modo Promiscuo") 
+    else:
+        response["promiscuous_interfaces"] = []
+        response["alarm_promiscuous_mode"] = "No estan en modo promiscuo"
+    
+    return response
 
 @app.get("/mail")
 async def check_mail_queue():
@@ -272,7 +315,6 @@ async def check_mail_queue():
 
     response = {"message": "Verificando tamaño de cola de correos"}
 
-    # Check mail queue size
     try:
         output = subprocess.check_output(["mailq"])
         queue_size = len(output.splitlines())
@@ -280,16 +322,17 @@ async def check_mail_queue():
     except subprocess.CalledProcessError as e:
         response["error"] = f"Error checking mail queue: {e}"
 
-    # Check if the user's IP address is suspicious, block access, and add an alert
+    # Ve la ip del usuario, si es sospechosa la bloquea y manda alerta
     if user_ip and is_suspicious(user_ip):
         response["alert_block_ip"] = "IP sospechosa bloqueada"
-        # block_ip(user_ip)  # Uncomment this line to block the suspicious IP address
+        # block_ip(user_ip)  #descomentar
+        write_prevention_log("Bloqueo de IP SUSSY BAKA",ip=user_ip) 
 
-    # Check if a user generates many emails, and send an alert to change password
+    # Ve si eun usuario esta mandadno muchos mails, manda una alerta
     user_email_count = get_user_email_count()
     if user_email_count > max_emails_per_user:
         username = psutil.Process().username()
-        response["alert_change_password"] = f"Usuario {username}, cambie su contraseña debido a muchos correos enviados. Por razones de seguridad, se recomienda cambiar la contraseña regularmente."
+        response["alert_change_password"] = f"Usuario {username}, cambie su contraseña debido a muchos correos enviados."
 
     return response
 
@@ -306,7 +349,7 @@ def get_user_email_count():
 async def check_memory_usage():
     response = {"message": "Verificando procesos con alto consumo de memoria"}
 
-    # Get the processes consuming a high percentage of memory
+    # Ve que poceso consume mucha memoria
     high_memory_processes = []
     for process in psutil.process_iter(["pid", "name", "memory_percent", "create_time"]):
         if process.info["memory_percent"] > memory_percentage:  
@@ -314,8 +357,8 @@ async def check_memory_usage():
 
     response["high_memory_processes"] = high_memory_processes
 
-    # Terminate processes that have been running for more than 1 hour
-    now = datetime.now()
+    # MAta el proceso si tiene mas de N tiempo activo
+    now = datetime.datetime.now()
     for process_info in high_memory_processes:
         create_time = datetime.fromtimestamp(process_info["create_time"])
         if (now - create_time) > timedelta(max_hours_memory):
@@ -323,6 +366,7 @@ async def check_memory_usage():
                 process = psutil.Process(process_info["pid"])
                 process.terminate()
                 response["message"] = f"Proceso {process_info['name']} (PID: {process_info['pid']}) terminado por alto consumo de memoria y tiempo de ejecución."
+                write_prevention_log("Proceso UnAlive", ip= process_info)
             except psutil.NoSuchProcess:
                 response["message"] = "Error al terminar el proceso: proceso no encontrado."
 
@@ -392,24 +436,25 @@ def check_for_scripts_in_files():
 
 @app.get("/temp")
 def check_tmp_directory():
-    response = {"message": "Checking /tmp directory for suspicious files and processes"}
+    response = {"message": "Verificando directorio /tmp"}
 
-    # Move suspicious files to quarantine and get alerts
+    # Mueve archivos sussy baka a cuarentena
     quarantine_alerts = move_files_to_quarantine()
     if quarantine_alerts:
         response["quarantine_alerts"] = quarantine_alerts
+        write_prevention_log("Archivo a Cuarentena por COVID 20",ip = quarantine_alerts)
     else:
         response["quarantine_alerts"] = "No quarentine alerts found in /tmp directory"
         
 
-    # Terminate processes in /tmp directory and get alerts
+    # Mata procesos en tmp
     terminate_alerts = terminate_processes_in_tmp()
     if terminate_alerts:
         response["terminate_alerts"] = terminate_alerts
     else:
         response["terminate_alerts"] = "No terminate alerts found in /tmp directory"
 
-    # Check for scripts in files
+    # Verifica si existen scripts en los archivos
     suspicious_files = check_for_scripts_in_files()
     if suspicious_files:
         response["suspicious_files"] = suspicious_files
@@ -446,11 +491,11 @@ def check_user_cron() -> List[str]:
                 list_cron = execute_process(command_crontab)
 
                 if "no crontab for" in "".join(list_cron):
-                    alerts.append(f"No cron job found for user {user}")
+                    alerts.append(f"No se encontro cron para {user}")
                 else:
                     for cron in list_cron:
                         cron = cron.split()
-                        alerts.append(f"User {user} is executing the file {cron[-1]} as cron")
+                        alerts.append(f"{user} esta ejecutando {cron[-1]} como cron, CRUSIFIQUENLO!!!")
 
     except Exception as error:
         print('An exception occurred', error)
@@ -459,14 +504,14 @@ def check_user_cron() -> List[str]:
 
 @app.get("/cron")
 def examine_user_cron():
-    response = {"message": "Checking user cron jobs"}
+    response = {"message": "Verificando cron "}
 
-    # Check user cron jobs
+    # Verifica crons
     cron_alerts = check_user_cron()
     if cron_alerts:
         response["cron_alerts"] = cron_alerts
     else:
-        response["cron_alerts"] = "No user cron jobs found"
+        response["cron_alerts"] = "No cron encontrados"
 
     return response
 
@@ -480,12 +525,9 @@ def check_authentication_failure():
         lines = output.splitlines()
 
         for line in lines:
-            if "Invalid user" in line:
-                user = line.split("Invalid user ")[1].split(" ")[0]
-                suspicious_users.add(user)
-
-            if "Failed password" in line:
-                ip = line.split("from ")[1].split(" ")[0]
+            ip_match = re.search(r'rhost=(\S+)', line)
+            if ip_match:
+                ip = ip_match.group(1)
                 suspicious_ips.add(ip)
 
     except subprocess.CalledProcessError as e:
@@ -493,38 +535,52 @@ def check_authentication_failure():
 
     return suspicious_users, suspicious_ips
 
-
 @app.get("/invalid")
 def check_invalid_login_attempts():
     suspicious_users, suspicious_ips = check_authentication_failure()
 
     response = {
-        "message": "Checking logs for invalid login attempts.",
+        "message": "Verifricando los logs  por inicios de sesion fallidos.",
         "suspicious_users": list(suspicious_users),
         "suspicious_ips": list(suspicious_ips),
     }
 
     if suspicious_users or suspicious_ips:
-        # Replace the following line with code to send an alarm notification (e.g., email, log message, etc.)
-        # logs.log_alarm(...)
-        response["alarm"] = "Suspicious activity detected! Check logs for more details."
+        response["alarm"] = "Actividad AMONGUS DETECTADA! Verifique los logs."
+
+        # Writing the alarm log
+        for user in suspicious_users:
+            write_alarm_log("Invalid login attempt (user)", user)
+        
+        for ip in suspicious_ips:
+            write_alarm_log("Invalid login attempt (IP)", ip)
 
     return response
 
-
 def create_hips_directory():
-    hips_directory = "/var/logs/hips"
+    hips_directory = "/var/log/hips"
     if not os.path.exists(hips_directory):
         os.makedirs(hips_directory)
+
+
+def write_alarm_log(alarm_type, ip=None):
+    hips_log_path = "/var/log/hips/alarmas.log"
+    now = datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    log_entry = f"{now} :: {alarm_type} :: {ip}\n" if ip else f"{now} :: {alarm_type}\n"
+    
+    with open(hips_log_path, "a") as file:
+        file.write(log_entry)
 
 def process_secure_log():
     try:
         command_auth_log = "grep 'Failed password' /var/log/secure"
         output = subprocess.check_output(command_auth_log, shell=True, text=True)
         if output:
-            hips_log_path = "/var/logs/hips/secure_log.txt"
-            with open(hips_log_path, "a") as file:
-                file.write(output)
+            ip_pattern = r"\b(?:\d{1,3}\.){3}\d{1,3}\b"
+            ips = re.findall(ip_pattern, output)
+            if ips:
+                for ip in ips:
+                    write_alarm_log("Failed password", ip)
             return True
     except subprocess.CalledProcessError as e:
         pass
@@ -535,9 +591,11 @@ def process_message_log():
         command_message_log = "grep 'Authentication failure' /var/log/messages"
         output = subprocess.check_output(command_message_log, shell=True, text=True)
         if output:
-            hips_log_path = "/var/logs/hips/message_log.txt"
-            with open(hips_log_path, "a") as file:
-                file.write(output)
+            ip_pattern = r"\b(?:\d{1,3}\.){3}\d{1,3}\b"
+            ips = re.findall(ip_pattern, output)
+            if ips:
+                for ip in ips:
+                    write_alarm_log("Authentication failure", ip)
             return True
     except subprocess.CalledProcessError as e:
         pass
@@ -548,9 +606,11 @@ def process_access_log():
         command_access_log = "grep 'Error' /var/log/httpd/access.log"
         output = subprocess.check_output(command_access_log, shell=True, text=True)
         if output:
-            hips_log_path = "/var/logs/hips/access_log.txt"
-            with open(hips_log_path, "a") as file:
-                file.write(output)
+            ip_pattern = r"\b(?:\d{1,3}\.){3}\d{1,3}\b"
+            ips = re.findall(ip_pattern, output)
+            if ips:
+                for ip in ips:
+                    write_alarm_log("Access log error", ip)
             return True
     except subprocess.CalledProcessError as e:
         pass
@@ -561,44 +621,38 @@ def process_mail_log():
         command_mail_log = "grep 'from=<.*>, size=' /var/log/maillog"
         output = subprocess.check_output(command_mail_log, shell=True, text=True)
         if output:
-            hips_log_path = "/var/logs/hips/mail_log.txt"
-            with open(hips_log_path, "a") as file:
-                file.write(output)
+            ip_pattern = r"\b(?:\d{1,3}\.){3}\d{1,3}\b"
+            ips = re.findall(ip_pattern, output)
+            if ips:
+                for ip in ips:
+                    write_alarm_log("Mail log", ip)
             return True
     except subprocess.CalledProcessError as e:
         pass
     return False
 
 @app.get("/logs")
-def examine_logs():
-    create_hips_directory()
+def check_logs():
+    alarms_found = False
     
-    found_secure_log = process_secure_log()
-    found_message_log = process_message_log()
-    found_access_log = process_access_log()
-    found_mail_log = process_mail_log()
+    if process_secure_log():
+        alarms_found = True
     
-    response = {"message": "Logs examined and processed"}
+    if process_message_log():
+        alarms_found = True
     
-    if found_secure_log:
-        response["alarm_secure_log"] = "Found suspicious entry in secure log"
+    if process_access_log():
+        alarms_found = True
+    
+    if process_mail_log():
+        alarms_found = True
+    
+    response = {"message": "Se comprobaron los Logs"}
+    
+    if alarms_found:
+        response["alarm"] = "Se ENcontro algo. Mira /var/log/hips/alarmas.log."
     else:
-        response["alarm_secure_log"] = "No suspicious entry found in secure log"
-    
-    if found_message_log:
-        response["alarm_message_log"] = "Found suspicious entry in message log"
-    else:
-        response["alarm_message_log"] = "No suspicious entry found in message log"
-    
-    if found_access_log:
-        response["alarm_access_log"] = "Found suspicious entry in access log"
-    else:
-        response["alarm_access_log"] = "No suspicious entry found in access log"
-    
-    if found_mail_log:
-        response["alarm_mail_log"] = "Found suspicious entry in mail log"
-    else:
-        response["alarm_mail_log"] = "No suspicious entry found in mail log"
-    
+        response["alarm"] = "No se encontro nada papu."
     
     return response
+
