@@ -63,6 +63,9 @@ max_hours_memory=1
 # Diccionario para mantener un registro de IPs con intentos de acceso no válidos
 invalid_attempts: defaultdict = defaultdict(int)
 
+#donde se encuentran los logs
+logs_directory = "/var/log/hips"
+
 
 def calculate_file_hash(file_path):
     try:
@@ -656,3 +659,18 @@ def check_logs():
     
     return response
 
+@app.get('/verlogs')
+async def read_logs():
+    logs = {}
+    alarmas_log_path = os.path.join(logs_directory, "alarmas.log")
+    prevencion_log_path = os.path.join(logs_directory, "prevencion.log")
+
+    if os.path.exists(alarmas_log_path):
+        with open(alarmas_log_path, "r") as alarmas_file:
+            logs["alarmas.log"] = alarmas_file.read()
+
+    if os.path.exists(prevencion_log_path):
+        with open(prevencion_log_path, "r") as prevencion_file:
+            logs["prevencion.log"] = prevencion_file.read()
+
+    return logs

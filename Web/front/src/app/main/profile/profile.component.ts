@@ -79,11 +79,16 @@ export class ProfileComponent implements OnInit {
       console.log(resp)
     })
   }
+  Verlogs(): void{
+    console.log('VerLogs');
+    this._api.seelogs().subscribe(resp => {
+      console.log(resp)
+    })
+  }
   Invalid(): void{
     console.log('Invalid')
     this._api.checkInvalid().subscribe(resp => {
       console.log(resp)
     })
   }
-
 }

@@ -20,7 +20,7 @@ Para El HIPS
 
 5- `pip install -r requeriments.txt`
 
-6 - `uvicorn main:app –reload`
+6 - `uvicorn main:app –reload` o `sudo /usr/local/bin/uvicorn main:app --reload`
 
 7- `Interfaz web: localhost:8000/docs`
 

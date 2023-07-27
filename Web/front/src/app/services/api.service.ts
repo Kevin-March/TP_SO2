@@ -65,5 +65,8 @@ export class ApiService {
   checkLogs(){
     return this.httpClient.get<any>(`${this.REST_API_SERVER}logs/`);
   }
+  seelogs(){
+    return this.httpClient.get<any>(`${this.REST_API_SERVER}verlogs/`);
+  }
 
 }
